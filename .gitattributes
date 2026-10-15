@@ -1,0 +1,5 @@
+# Normalise line endings to LF in the repo so Windows checkouts don't fight CI (Linux).
+* text=auto eol=lf
+
+# PowerShell scripts keep CRLF for Windows tooling.
+*.ps1 text eol=crlf
