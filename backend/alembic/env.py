@@ -5,20 +5,22 @@ from sqlalchemy import create_engine, pool
 from alembic import context
 from app.core.config import get_settings
 from app.core.db import CONNECT_TIMEOUT_SECONDS
-from app.models.base import Base
+from app.models import Base  # importing app.models registers every model on Base.metadata
 
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # Keep the app's own loggers alive when migrations run inside the test suite.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # Autogenerate compares the database against these models.
 target_metadata = Base.metadata
 
 
 def _database_url() -> str:
-    # Same source as the app, so migrations always hit the database the app uses.
-    return get_settings().database_url
+    # Tests set this option to migrate a scratch database. Otherwise use the same source as the
+    # app, so migrations always hit the database the app uses.
+    return config.get_main_option("sqlalchemy.url") or get_settings().database_url
 
 
 def run_migrations_offline() -> None:
