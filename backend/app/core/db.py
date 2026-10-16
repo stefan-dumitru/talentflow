@@ -4,6 +4,7 @@ from functools import lru_cache
 from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.core import tenancy  # noqa: F401  (importing it switches company scoping on)
 from app.core.config import get_settings
 
 # Fail fast instead of hanging a request when Postgres is unreachable.

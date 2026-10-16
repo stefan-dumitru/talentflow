@@ -21,6 +21,7 @@ os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 os.environ["ENVIRONMENT"] = "test"
 
 from app.core.db import get_engine  # noqa: E402
+from app.core.tenancy import TenantScope, set_scope  # noqa: E402
 from app.main import create_app  # noqa: E402
 from app.models import Company, Plan  # noqa: E402
 from tests.support import alembic_config  # noqa: E402
@@ -70,12 +71,39 @@ def db_session() -> Iterator[Session]:
     session = Session(
         bind=connection, join_transaction_mode="create_savepoint", expire_on_commit=False
     )
+    # Tests arrange their data like a system actor would. Tests of the scoping rules themselves
+    # use the session_with_scope fixture below instead.
+    set_scope(session, TenantScope.unrestricted())
     try:
         yield session
     finally:
         session.close()
         outer_transaction.rollback()
         connection.close()
+
+
+@pytest.fixture
+def session_with_scope(db_session: Session) -> Iterator[Callable[[TenantScope | None], Session]]:
+    """Makes extra sessions that share db_session's transaction, so they see its test data.
+
+    Pass the scope to declare, or None to leave it undeclared.
+    """
+    created: list[Session] = []
+
+    def _make(scope: TenantScope | None) -> Session:
+        session = Session(
+            bind=db_session.get_bind(),
+            join_transaction_mode="create_savepoint",
+            expire_on_commit=False,
+        )
+        if scope is not None:
+            set_scope(session, scope)
+        created.append(session)
+        return session
+
+    yield _make
+    for session in created:
+        session.close()
 
 
 @pytest.fixture
