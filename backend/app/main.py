@@ -2,7 +2,7 @@ import logging
 
 from fastapi import FastAPI
 
-from app.api import health
+from app.api import health, me, staff
 from app.core.config import get_settings
 from app.core.errors import RequestIdMiddleware
 
@@ -14,6 +14,8 @@ def create_app() -> FastAPI:
     app = FastAPI(title="TalentFlow API")
     app.add_middleware(RequestIdMiddleware)
     app.include_router(health.router)
+    app.include_router(me.router)
+    app.include_router(staff.router)
     return app
 
 

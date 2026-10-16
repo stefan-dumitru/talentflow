@@ -9,6 +9,13 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from alembic import command
+from tests.auth_support import (
+    TEST_AUDIENCE,
+    TEST_ISSUER,
+    StubKeyProvider,
+    TokenFactory,
+    generate_rsa_key,
+)
 
 # Tests run against the separate `talentflow_test` database from docker-compose.yml, never the
 # dev database and never SQLite. CI sets TEST_DATABASE_URL; the default matches the local-only
@@ -20,6 +27,7 @@ TEST_DATABASE_URL = os.environ.get(
 os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 os.environ["ENVIRONMENT"] = "test"
 
+from app.core.auth import TokenValidator, get_token_validator  # noqa: E402
 from app.core.db import get_engine  # noqa: E402
 from app.core.tenancy import TenantScope, set_scope  # noqa: E402
 from app.main import create_app  # noqa: E402
@@ -104,6 +112,59 @@ def session_with_scope(db_session: Session) -> Iterator[Callable[[TenantScope | 
     yield _make
     for session in created:
         session.close()
+
+
+@pytest.fixture(scope="session")
+def token_factory() -> TokenFactory:
+    """Signs test tokens. One key for the whole run, since generating RSA keys is slow."""
+    return TokenFactory(generate_rsa_key())
+
+
+@pytest.fixture
+def token_validator(token_factory: TokenFactory) -> TokenValidator:
+    return TokenValidator(
+        issuer=TEST_ISSUER,
+        audience=TEST_AUDIENCE,
+        key_provider=StubKeyProvider({token_factory.kid: token_factory.public_key}),
+        clock_skew_seconds=30,
+    )
+
+
+def _empty_company_and_user_tables() -> None:
+    # `plans` is left alone: the migration seeds it and tests rely on it.
+    with get_engine().begin() as connection:
+        connection.execute(
+            text("TRUNCATE staff_roles, staff_members, companies, users RESTART IDENTITY CASCADE")
+        )
+
+
+@pytest.fixture
+def clean_database() -> Iterator[None]:
+    """For tests whose code really commits (HTTP requests, threads): wipe their rows after.
+
+    The db_session fixture rolls everything back instead and doesn't need this.
+    """
+    _empty_company_and_user_tables()
+    yield
+    _empty_company_and_user_tables()
+
+
+@pytest.fixture
+def committed_session(clean_database: None) -> Iterator[Session]:
+    """A system-level session whose commits are real, to arrange data for HTTP tests."""
+    with Session(get_engine(), expire_on_commit=False) as session:
+        set_scope(session, TenantScope.unrestricted())
+        yield session
+
+
+@pytest.fixture
+def api_client(
+    app: FastAPI, token_validator: TokenValidator, clean_database: None
+) -> Iterator[TestClient]:
+    """A client for the real app, trusting tokens signed by the test key."""
+    app.dependency_overrides[get_token_validator] = lambda: token_validator
+    with TestClient(app) as test_client:
+        yield test_client
 
 
 @pytest.fixture
