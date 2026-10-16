@@ -36,7 +36,7 @@ def add_staff_member(
 
     existing_user = session.scalar(select(User).where(User.email == email))
     if existing_user is not None:
-        raise EmailAlreadyInUseError(_describe_email_conflict(session, existing_user))
+        raise EmailAlreadyInUseError(describe_email_conflict(session, existing_user))
 
     user = User(email=email, display_name=display_name.strip())
     session.add(user)
@@ -61,7 +61,7 @@ def deactivate_staff_member(session: Session, member: StaffMember) -> None:
     if not member.is_active:
         return
 
-    if _is_company_admin(session, member) and _other_active_admins(session, member) == 0:
+    if has_role(session, member, Role.COMPANY_ADMIN) and _other_active_admins(session, member) == 0:
         raise LastCompanyAdminError(
             "This is the company's last active admin. Make someone else an admin first."
         )
@@ -71,7 +71,8 @@ def deactivate_staff_member(session: Session, member: StaffMember) -> None:
     session.flush()
 
 
-def _describe_email_conflict(session: Session, existing_user: User) -> str:
+def describe_email_conflict(session: Session, existing_user: User) -> str:
+    """Why an email can't be given to someone new: say which kind of account already has it."""
     # A user is staff, a platform admin, or a candidate: whichever it is, the email is taken.
     if existing_user.is_platform_admin:
         return "This email belongs to a platform administrator."
@@ -81,11 +82,17 @@ def _describe_email_conflict(session: Session, existing_user: User) -> str:
     return "This email is used by a candidate account."
 
 
-def _is_company_admin(session: Session, member: StaffMember) -> bool:
+def find_staff_member_by_email(session: Session, email: str) -> StaffMember | None:
+    return session.scalar(
+        select(StaffMember).join(User, User.id == StaffMember.user_id).where(User.email == email)
+    )
+
+
+def has_role(session: Session, member: StaffMember, role: Role) -> bool:
     return (
         session.scalar(
             select(StaffRole.staff_member_id).where(
-                StaffRole.staff_member_id == member.id, StaffRole.role == Role.COMPANY_ADMIN
+                StaffRole.staff_member_id == member.id, StaffRole.role == role
             )
         )
         is not None
